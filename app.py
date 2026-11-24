@@ -1,12 +1,7 @@
-import os
-import json
-import base64
 import streamlit as st
-from openai import OpenAI
-from PIL import Image
 
 st.set_page_config(
-    page_title="StudyDost AI",
+    page_title="StudyDost",
     page_icon="🎓",
     layout="centered",
     initial_sidebar_state="expanded",
@@ -23,44 +18,38 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-API_KEY = os.getenv("OPENAI_API_KEY")
-if not API_KEY:
-    try:
-        API_KEY = st.secrets.get("OPENAI_API_KEY")
-    except Exception:
-        API_KEY = None
+# StudyDost is a manual, no-AI study organiser.
+# Notes, chapters and question banks are kept in the current Streamlit session.
+BOARDS = ["CBSE", "MP Board"]
+CLASSES = [f"Class {n}" for n in range(1, 13)]
 
-client = OpenAI(api_key=API_KEY) if API_KEY else None
-MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-
-def ask_ai(messages, temperature=0.4):
-    if client is None:
-        raise RuntimeError("AI API key is not configured. Set OPENAI_API_KEY on the server.")
-    response = client.chat.completions.create(
-        model=MODEL,
-        messages=messages,
-        temperature=temperature,
-    )
-    return response.choices[0].message.content.strip()
-
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
 if "user_name" not in st.session_state:
     st.session_state.user_name = ""
-if "syllabus" not in st.session_state:
-    st.session_state.syllabus = {}
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "study_data" not in st.session_state:
+    st.session_state.study_data = {}
 if "study_time" not in st.session_state:
     st.session_state.study_time = "2 घंटे"
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "quiz_data" not in st.session_state:
-    st.session_state.quiz_data = None
-if "quiz_answers" not in st.session_state:
-    st.session_state.quiz_answers = {}
+if "quiz_result" not in st.session_state:
+    st.session_state.quiz_result = None
+
+def current_key():
+    return (st.session_state.board, st.session_state.school_class)
+
+def get_class_data():
+    return st.session_state.study_data.setdefault(
+        current_key(), {"subjects": {}, "timetable": ""}
+    )
+
+def get_subject_data(subject):
+    return get_class_data()["subjects"].setdefault(
+        subject, {"chapters": {}, "questions": []}
+    )
 
 if not st.session_state.logged_in:
-    st.markdown("<h1 style='text-align:center;color:#1a73e8'>🎓 StudyDost AI</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center'>आपका Personal AI Study Partner</p>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center;color:#1a73e8'>🎓 StudyDost</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center'>आपका अपना Study Planner</p>", unsafe_allow_html=True)
     with st.form("login"):
         name = st.text_input("आपका नाम")
         submitted = st.form_submit_button("शुरू करें 🚀", use_container_width=True)
@@ -71,148 +60,152 @@ if not st.session_state.logged_in:
                 st.rerun()
             else:
                 st.error("कृपया अपना नाम लिखें।")
-    st.caption("यह शुरुआती संस्करण demo login इस्तेमाल करता है; अभी कोई असली अकाउंट/पासवर्ड सिस्टम नहीं है।")
+    st.caption("यह ऐप बिना AI और बिना API key के काम करता है।")
     st.stop()
 
 with st.sidebar:
     st.markdown(f"### नमस्ते, {st.session_state.user_name} 👋")
+    st.selectbox("Board चुनें", BOARDS, key="board")
+    st.selectbox("Class चुनें", CLASSES, key="school_class")
     menu = st.radio(
         "मेनू",
-        ["📖 सिलेबस और टाइमटेबल", "🤖 AI स्टडी चैट", "📸 फोटो से सवाल हल करें", "📝 क्विज़ और मॉक टेस्ट"],
+        ["🏠 होम", "📚 विषय और चैप्टर", "📝 नोट्स", "✅ MCQ टेस्ट", "⏰ टाइमटेबल"],
         label_visibility="collapsed",
     )
     if st.button("लॉगआउट", use_container_width=True):
         st.session_state.logged_in = False
-        st.session_state.chat_history = []
         st.rerun()
 
-if not client:
-    st.warning("AI फीचर चालू करने के लिए सर्वर पर OPENAI_API_KEY सेट करें। API key को Android ऐप या इस कोड में hard-code न करें।")
+st.title("🎓 StudyDost")
+st.caption(f"{st.session_state.board} • {st.session_state.school_class}")
 
-if menu == "📖 सिलेबस और टाइमटेबल":
-    st.title("📖 सिलेबस और टाइमटेबल")
-    st.session_state.study_time = st.text_input("रोज़ पढ़ाई का समय", st.session_state.study_time)
+class_data = get_class_data()
+subjects = list(class_data["subjects"].keys())
+
+if menu == "🏠 होम":
+    st.subheader(f"नमस्ते {st.session_state.user_name}!")
+    st.write("पढ़ाई को व्यवस्थित करने के लिए StudyDost इस्तेमाल करें।")
+    c1, c2 = st.columns(2)
+    c1.metric("जोड़े गए विषय", len(subjects))
+    chapter_count = sum(len(v["chapters"]) for v in class_data["subjects"].values())
+    c2.metric("जोड़े गए चैप्टर", chapter_count)
+    st.info("शुरू करने के लिए साइडबार से Board और Class चुनें, फिर विषय और चैप्टर जोड़ें।")
+    st.warning("नोट: इस संस्करण में पाठ्यपुस्तक की पूरी आधिकारिक सामग्री पहले से शामिल नहीं है। अपने स्कूल/किताब के अनुसार सामग्री जोड़ें।")
+
+elif menu == "📚 विषय और चैप्टर":
+    st.subheader("विषय और चैप्टर")
     with st.form("add_subject"):
-        subject = st.text_input("विषय (जैसे Maths, Science)")
-        chapters = st.text_area("चैप्टर के नाम (हर चैप्टर नई लाइन में)")
-        save = st.form_submit_button("सिलेबस सेव करें")
-        if save:
-            if subject.strip() and chapters.strip():
-                st.session_state.syllabus[subject.strip()] = chapters.strip()
-                st.success(f"{subject} का सिलेबस सेव हो गया।")
+        subject = st.text_input("विषय का नाम (जैसे Maths, Science, Hindi)")
+        add_subject = st.form_submit_button("विषय जोड़ें")
+        if add_subject:
+            if subject.strip():
+                get_subject_data(subject.strip())
+                st.success(f"{subject.strip()} जोड़ दिया गया।")
+                st.rerun()
             else:
-                st.error("विषय और चैप्टर दोनों लिखें।")
-    if st.session_state.syllabus:
-        for sub, ch in st.session_state.syllabus.items():
-            with st.expander(sub):
-                st.write(ch)
+                st.error("विषय का नाम लिखें।")
+
+    if subjects:
+        selected_subject = st.selectbox("विषय चुनें", subjects, key="chapter_subject")
+        with st.form("add_chapter"):
+            chapter = st.text_input("चैप्टर का नाम")
+            chapter_note = st.text_area("चैप्टर का छोटा विवरण (वैकल्पिक)")
+            save_chapter = st.form_submit_button("चैप्टर सेव करें")
+            if save_chapter:
+                if chapter.strip():
+                    get_subject_data(selected_subject)["chapters"][chapter.strip()] = chapter_note.strip()
+                    st.success("चैप्टर सेव हो गया।")
+                    st.rerun()
+                else:
+                    st.error("चैप्टर का नाम लिखें।")
+        st.markdown("#### सेव किए गए चैप्टर")
+        for ch, desc in get_subject_data(selected_subject)["chapters"].items():
+            with st.expander(ch):
+                st.write(desc if desc else "अभी कोई विवरण नहीं जोड़ा गया।")
     else:
-        st.info("अभी कोई विषय नहीं जोड़ा गया है।")
+        st.info("पहले अपना पहला विषय जोड़ें।")
 
-elif menu == "🤖 AI स्टडी चैट":
-    st.title("🤖 आपका AI स्टडी दोस्त")
-    st.caption("किसी भी विषय का सवाल पूछें। AI आसान भाषा में समझाने की कोशिश करेगा।")
-    if st.session_state.syllabus:
-        st.caption("आपका सिलेबस: " + "; ".join(st.session_state.syllabus.keys()))
-    for role, content in st.session_state.chat_history:
-        with st.chat_message(role):
-            st.markdown(content)
-    prompt = st.chat_input("अपना सवाल लिखें...")
-    if prompt:
-        st.session_state.chat_history.append(("user", prompt))
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        context = (
-            f"Student name: {st.session_state.user_name}. "
-            f"Daily study time: {st.session_state.study_time}. "
-            f"Syllabus: {json.dumps(st.session_state.syllabus, ensure_ascii=False)}. "
-            "You are StudyDost AI, a patient school tutor. Reply in the language the student uses. "
-            "Explain step by step in age-appropriate, simple language. Do not invent textbook facts."
-        )
-        try:
-            answer = ask_ai(
-                [{"role": "system", "content": context}]
-                + [{"role": r, "content": c} for r, c in st.session_state.chat_history[-12:]]
-            )
-        except Exception as e:
-            answer = f"AI से जवाब लेते समय समस्या आई: {e}"
-        st.session_state.chat_history.append(("assistant", answer))
-        with st.chat_message("assistant"):
-            st.markdown(answer)
-
-elif menu == "📸 फोटो से सवाल हल करें":
-    st.title("📸 फोटो से सवाल हल करें")
-    st.write("किताब या कॉपी के सवाल की साफ़ फोटो अपलोड करें।")
-    file = st.file_uploader("फोटो चुनें", type=["jpg", "jpeg", "png"])
-    if file:
-        image = Image.open(file).convert("RGB")
-        st.image(image, caption="अपलोड की गई फोटो", use_container_width=True)
-        if st.button("🔍 सवाल समझाओ और हल करो", use_container_width=True):
-            if not client:
-                st.error("पहले सर्वर पर OPENAI_API_KEY सेट करें।")
-            else:
-                try:
-                    import io
-                    buf = io.BytesIO()
-                    image.save(buf, format="JPEG", quality=85)
-                    encoded = base64.b64encode(buf.getvalue()).decode("utf-8")
-                    result = client.chat.completions.create(
-                        model=MODEL,
-                        messages=[
-                            {"role": "system", "content": "You are a careful school tutor. Read the uploaded question and explain the solution step by step in simple Hindi unless the question is in English. If text is unclear, say so rather than guessing."},
-                            {"role": "user", "content": [
-                                {"type": "text", "text": "इस फोटो में दिए गए सवाल को पढ़कर हल करो।"},
-                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}}
-                            ]}
-                        ],
-                        max_tokens=1200,
-                    )
-                    st.markdown("### समाधान")
-                    st.markdown(result.choices[0].message.content)
-                except Exception as e:
-                    st.error(f"फोटो समझने में समस्या आई: {e}")
-
-elif menu == "📝 क्विज़ और मॉक टेस्ट":
-    st.title("📝 क्विज़ और मॉक टेस्ट")
-    if not st.session_state.syllabus:
-        st.info("पहले सिलेबस सेक्शन में विषय और चैप्टर जोड़ें।")
+elif menu == "📝 नोट्स":
+    st.subheader("अपने नोट्स")
+    if not subjects:
+        st.info("पहले 'विषय और चैप्टर' में विषय जोड़ें।")
     else:
-        subject = st.selectbox("विषय चुनें", list(st.session_state.syllabus.keys()))
-        count = st.selectbox("प्रश्नों की संख्या", [5, 10])
-        if st.button("नया टेस्ट बनाएं 🚀", use_container_width=True):
-            if not client:
-                st.error("पहले सर्वर पर OPENAI_API_KEY सेट करें।")
-            else:
-                prompt = f"""Create {count} school-level multiple-choice questions based ONLY on these chapters:
-{st.session_state.syllabus[subject]}
-Return valid JSON only in this shape:
-{{"questions":[{{"question":"...","options":["A...","B...","C...","D..."],"answer":0,"explanation":"..."}}]}}
-The answer is the zero-based option index. Use clear language."""
-                try:
-                    raw = ask_ai([{"role": "user", "content": prompt}], temperature=0.2)
-                    raw = raw.removeprefix("```json").removesuffix("```").strip()
-                    data = json.loads(raw)
-                    st.session_state.quiz_data = {"subject": subject, **data}
-                    st.session_state.quiz_answers = {}
-                except Exception as e:
-                    st.error(f"टेस्ट बनाने में समस्या आई: {e}")
-        quiz = st.session_state.quiz_data
-        if quiz:
-            st.subheader(f"{quiz['subject']} टेस्ट")
-            with st.form("quiz_form"):
-                for i, q in enumerate(quiz["questions"]):
+        selected_subject = st.selectbox("विषय", subjects, key="notes_subject")
+        chapter_names = list(get_subject_data(selected_subject)["chapters"].keys())
+        if chapter_names:
+            selected_chapter = st.selectbox("चैप्टर", chapter_names)
+            existing = get_subject_data(selected_subject)["chapters"].get(selected_chapter, "")
+            note = st.text_area("नोट्स / महत्वपूर्ण प्रश्न-उत्तर", value=existing, height=220)
+            if st.button("नोट्स सेव करें", use_container_width=True):
+                get_subject_data(selected_subject)["chapters"][selected_chapter] = note
+                st.success("नोट्स सेव हो गए।")
+        else:
+            st.info("इस विषय में पहले चैप्टर जोड़ें।")
+
+elif menu == "✅ MCQ टेस्ट":
+    st.subheader("अपना MCQ प्रश्न बैंक बनाएं")
+    if not subjects:
+        st.info("पहले विषय जोड़ें।")
+    else:
+        selected_subject = st.selectbox("विषय", subjects, key="quiz_subject")
+        qdata = get_subject_data(selected_subject)
+        with st.expander("नया MCQ प्रश्न जोड़ें", expanded=True):
+            with st.form("add_mcq"):
+                question = st.text_input("प्रश्न")
+                options = [st.text_input(f"विकल्प {letter}") for letter in ["A", "B", "C", "D"]]
+                correct = st.selectbox("सही उत्तर", ["A", "B", "C", "D"])
+                explanation = st.text_input("समाधान / व्याख्या (वैकल्पिक)")
+                add_q = st.form_submit_button("प्रश्न सेव करें")
+                if add_q:
+                    if question.strip() and all(x.strip() for x in options):
+                        qdata["questions"].append({
+                            "question": question.strip(),
+                            "options": [x.strip() for x in options],
+                            "answer": ["A", "B", "C", "D"].index(correct),
+                            "explanation": explanation.strip(),
+                        })
+                        st.success("प्रश्न सेव हो गया।")
+                        st.rerun()
+                    else:
+                        st.error("प्रश्न और चारों विकल्प भरें।")
+
+        if qdata["questions"]:
+            st.markdown(f"#### {selected_subject} — {len(qdata['questions'])} प्रश्न")
+            with st.form("take_quiz"):
+                answers = []
+                for i, q in enumerate(qdata["questions"]):
                     st.markdown(f"**Q{i+1}. {q['question']}**")
-                    choice = st.radio("एक उत्तर चुनें", q["options"], key=f"q_{i}", index=None, label_visibility="collapsed")
-                    st.session_state.quiz_answers[i] = choice
+                    answers.append(st.radio(
+                        "उत्तर चुनें", q["options"], key=f"answer_{current_key()}_{selected_subject}_{i}",
+                        index=None, label_visibility="collapsed"
+                    ))
                 submitted = st.form_submit_button("उत्तर जाँचें")
             if submitted:
-                score = 0
-                for i, q in enumerate(quiz["questions"]):
-                    chosen = st.session_state.quiz_answers.get(i)
-                    correct = q["options"][q["answer"]]
-                    if chosen == correct:
-                        score += 1
-                        st.success(f"Q{i+1}: सही! {q['explanation']}")
-                    else:
-                        st.error(f"Q{i+1}: सही उत्तर — {correct}. {q['explanation']}")
-                st.metric("आपका स्कोर", f"{score}/{len(quiz['questions'])}")
+                score = sum(
+                    1 for i, q in enumerate(qdata["questions"])
+                    if answers[i] == q["options"][q["answer"]]
+                )
+                st.session_state.quiz_result = (score, len(qdata["questions"]))
+                st.success(f"आपका स्कोर: {score}/{len(qdata['questions'])}")
+                for i, q in enumerate(qdata["questions"]):
+                    st.write(f"Q{i+1}: सही उत्तर — {q['options'][q['answer']]}")
+                    if q["explanation"]:
+                        st.caption(q["explanation"])
+        else:
+            st.info("अभी प्रश्न नहीं हैं। ऊपर से अपने MCQ जोड़ें।")
+
+elif menu == "⏰ टाइमटेबल":
+    st.subheader("आपका पढ़ाई टाइमटेबल")
+    st.session_state.study_time = st.text_input("रोज़ पढ़ाई का लक्ष्य", st.session_state.study_time)
+    timetable = st.text_area(
+        "अपना टाइमटेबल लिखें",
+        value=class_data.get("timetable", ""),
+        height=220,
+        placeholder="उदाहरण:\n4:00–5:00 Maths\n5:00–5:30 Break\n5:30–6:30 Science",
+    )
+    if st.button("टाइमटेबल सेव करें", use_container_width=True):
+        class_data["timetable"] = timetable
+        st.success("टाइमटेबल सेव हो गया।")
+
+st.divider()
+st.caption("StudyDost • No AI • No API key required")
